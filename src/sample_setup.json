@@ -1,0 +1,6 @@
+{
+    "strategy": "direct",
+    "prompt": "test prompt",
+    "dataset": "../tasks/",
+    "model": "model name for results json, does not affect anything else"
+}
