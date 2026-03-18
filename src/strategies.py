@@ -63,8 +63,10 @@ def direct(ask_model, reload_context, setup) -> InferenceResult:
 
     answers = []
     for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
-        reload_context()
-        answer = ask_model(cur_prompt, problem / "collage.png")
-        answers.append(AnswerItem(problem=problem.name, answer=answer))
+        collage = problem / "collage.png"
+        if collage.exists():
+            reload_context()
+            answer = ask_model(cur_prompt, problem / "collage.png")
+            answers.append(AnswerItem(problem=problem.name, answer=answer))
 
     return InferenceResult(prompt=cur_prompt, model=setup["model"], answers=answers)
