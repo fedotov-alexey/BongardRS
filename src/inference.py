@@ -16,6 +16,7 @@ if __name__ == "__main__":
     # inference model
     setup = load_setup("sample_setup.json")
     results = direct(ask_model, reload_model, setup)
-    results.to_json("results.json")
+    results.save_as_json("results.json")
 
+    # load inference results
     results_from_json = InferenceResult.load_from_json_file("results.json")
