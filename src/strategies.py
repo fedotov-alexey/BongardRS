@@ -15,7 +15,7 @@ class AnswerItem:
 
 @dataclass
 class InferenceResult:
-    prompt: str
+    prompts: List[str]
     model: str
     answers: List[AnswerItem]
     end_time: str = field(init=False)
@@ -33,20 +33,29 @@ class InferenceResult:
             return file_path
 
         return json_data
+    
+    @classmethod
+    def from_dict(cls, dict_data):
+        """Create InferenceResult from dictionary"""
+        answers = [AnswerItem(**ans) for ans in dict_data["answers"]]
+        instance = cls(prompt=dict_data["prompts"], model=dict_data["model"], answers=answers)
+
+        instance.end_time = dict_data["end_time"]
+        return instance
 
     @classmethod
-    def from_json(cls, json_data):
-        """Create InferenceResult from JSON string or dict"""
-        if isinstance(json_data, str):
-            data = json.loads(json_data)
-        else:
-            data = json_data
+    def from_json_string(cls, json_data):
+        """Create InferenceResult from JSON string"""
+        data = json.loads(json_data)
+        return InferenceResult.from_dict(data)
+    
+    @classmethod
+    def load_from_json_file(cls, json_path):
+        """Load InferenceResult from JSON file"""
+        # load inference results
+        with open("results.json", 'r') as f:
+            data = json.load(f)
 
-        answers = [AnswerItem(**ans) for ans in data["answers"]]
-        instance = cls(prompt=data["prompt"], model=data["model"], answers=answers)
-
-        instance.end_time = data["end_time"]
-        return instance
 
 
 def load_setup(setup_path):
@@ -56,7 +65,7 @@ def load_setup(setup_path):
 
 
 def direct(ask_model, reload_context, setup) -> InferenceResult:
-    cur_prompt = setup["prompt"]
+    prompts = setup["prompts"]
     folder_path = Path(setup["dataset"])
     tasks_folders = [file for file in folder_path.iterdir()]
     tasks_folders = sorted(tasks_folders, key=lambda folder: folder.name)
@@ -66,7 +75,39 @@ def direct(ask_model, reload_context, setup) -> InferenceResult:
         collage = problem / "collage.png"
         if collage.exists():
             reload_context()
-            answer = ask_model(cur_prompt, problem / "collage.png")
+            answer = ask_model(prompts[0], problem / "collage.png")
             answers.append(AnswerItem(problem=problem.name, answer=answer))
 
-    return InferenceResult(prompt=cur_prompt, model=setup["model"], answers=answers)
+    return InferenceResult(prompts=prompts, model=setup["model"], answers=answers)
+
+def contrastive_iterative(ask_model, reload_context, setup) -> InferenceResult:
+    prompts = setup["prompts"]
+    first_prompt = prompts[0]
+    iterative_prompt = prompts[1]
+    last_prompt = prompts[2]
+    
+    folder_path = Path(setup["dataset"])
+    tasks_folders = [file for file in folder_path.iterdir()]
+    tasks_folders = sorted(tasks_folders, key=lambda folder: folder.name)
+  
+    answers = []
+    for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
+        reload_context()
+
+        pairs_folder = problem / "pairs"
+        if not pairs_folder.exists():
+            continue
+
+        pairs = [pair for pair in pairs_folder.iterdir()]
+        pairs = sorted(pairs, key=lambda file: file.name)
+
+        answer = ask_model(first_prompt, pairs[0])
+        for pair in pairs[1:-1]:
+            answer = ask_model(iterative_prompt, pair)
+
+        answer = ask_model(last_prompt, pairs[-1])
+
+        answers.append(AnswerItem(problem=problem.name, answer=answer))
+
+    return InferenceResult(prompts=prompts, model=setup["model"], answers=answers)
+
