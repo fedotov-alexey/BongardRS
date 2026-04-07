@@ -60,7 +60,6 @@ class InferenceResult:
     @classmethod
     def load_from_json_file(cls, json_path):
         """Load InferenceResult from JSON file"""
-        # load inference results
         with open("results.json", "r") as f:
             data = json.load(f)
 
@@ -70,6 +69,29 @@ def load_setup(setup_path):
         setup = json.load(file)
     return setup
 
+def load_folder(folder: Path) -> List[Path] | None:
+    if not folder.exists():
+        return None
+
+    files = [file for file in folder.iterdir()]
+    files = sorted(files, key=lambda file: file.name)
+
+    return files
+
+def get_descriptions(pics: List[Path], ask_model, prompt: str) -> List[str]:
+    answers = []
+    for pic in pics:
+        answers.append(ask_model(prompt, pic))
+
+    return answers
+
+def get_iterative_concept(pics: List[Path], ask_model, prompts: List[str]) -> str:
+    answer = ask_model(prompts[0], pics[0])
+    for pair in pics[1:-1]:
+        answer = ask_model(prompts[1], pair)
+
+    answer = ask_model(prompts[2], pics[-1])
+    return answer
 
 def direct(ask_model, reload_context, setup) -> InferenceResult:
     prompts = setup["prompts"]
@@ -87,14 +109,13 @@ def direct(ask_model, reload_context, setup) -> InferenceResult:
 
     return InferenceResult(prompts=prompts, model=setup["model"], answers=answers)
 
-def contrastive_direct(ask_model, reload_context, setup) -> InferenceResult:
+def descriptive_direct(ask_model, reload_context, setup) -> InferenceResult:
     prompts = setup["prompts"]
-    pair_prompt = prompts[0]
-    collage_prompt = prompts[2]
+    single_prompt = prompts[0]
+    collage_prompt = prompts[1]
 
     folder_path = Path(setup["dataset"])
-    tasks_folders = [file for file in folder_path.iterdir()]
-    tasks_folders = sorted(tasks_folders, key=lambda folder: folder.name)
+    tasks_folders = load_folder(folder_path)
 
     answers = []
     for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
@@ -104,19 +125,66 @@ def contrastive_direct(ask_model, reload_context, setup) -> InferenceResult:
         if not collage.exists():
             continue
 
-        pairs_folder = problem / "pairs"
-        if not pairs_folder.exists():
+        lefts = load_folder(problem / "left")
+        rights = load_folder(problem / "right")
+
+        lefts_desc = get_descriptions(lefts, ask_model, single_prompt)
+        rights_desc = get_descriptions(rights, ask_model, single_prompt)
+
+        answer = ask_model(collage_prompt.format(lefts_desc, rights_desc), collage)
+        answers.append(AnswerItem(problem=problem.name, answer=answer))
+
+    return InferenceResult(prompts=prompts, model=setup["model"], answers=answers)
+
+def descriptive_iterative(ask_model, reload_context, setup) -> InferenceResult:
+    prompts = setup["prompts"]
+    first_prompt = prompts[0]
+    iterative_prompt = prompts[1]
+    last_prompt = prompts[2]
+    collage_prompt = prompts[3]
+
+    folder_path = Path(setup["dataset"])
+    tasks_folders = load_folder(folder_path)
+
+    answers = []
+    for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
+        reload_context()
+
+        collage = problem / "collage.png"
+        if not collage.exists():
             continue
 
-        pairs = [pair for pair in pairs_folder.iterdir()]
-        pairs = sorted(pairs, key=lambda file: file.name)
+        lefts = load_folder(problem / "left")
+        rights = load_folder(problem / "right")
 
-        task_answers = []
-        for pair in pairs:
-            task_answers.append(ask_model(pair_prompt, pair))
+        left_concept = get_iterative_concept(lefts, ask_model, prompts)
+        right_concept = get_iterative_concept(rights, ask_model, prompts)
 
-        answer = ask_model(collage_prompt, collage)
-        
+        answer = ask_model(collage_prompt.format(left_concept, right_concept), collage)
+        answers.append(AnswerItem(problem=problem.name, answer=answer))
+
+    return InferenceResult(prompts=prompts, model=setup["model"], answers=answers)
+
+def contrastive_direct(ask_model, reload_context, setup) -> InferenceResult:
+    prompts = setup["prompts"]
+    pair_prompt = prompts[0]
+    collage_prompt = prompts[1]
+
+    folder_path = Path(setup["dataset"])
+    tasks_folders = load_folder(folder_path)
+
+    answers = []
+    for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
+        reload_context()
+
+        collage = problem / "collage.png"
+        if not collage.exists():
+            continue
+
+        pairs = load_folder(problem / "pairs")
+        pairs_decs = get_descriptions(pairs, ask_model, pair_prompt)
+
+        answer = ask_model(collage_prompt.format(pairs_decs), collage)
         answers.append(AnswerItem(problem=problem.name, answer=answer))
 
     return InferenceResult(prompts=prompts, model=setup["model"], answers=answers)
@@ -124,31 +192,17 @@ def contrastive_direct(ask_model, reload_context, setup) -> InferenceResult:
 
 def contrastive_iterative(ask_model, reload_context, setup) -> InferenceResult:
     prompts = setup["prompts"]
-    first_prompt = prompts[0]
-    iterative_prompt = prompts[1]
-    last_prompt = prompts[2]
 
     folder_path = Path(setup["dataset"])
-    tasks_folders = [file for file in folder_path.iterdir()]
-    tasks_folders = sorted(tasks_folders, key=lambda folder: folder.name)
+    tasks_folders = load_folder(folder_path)
 
     answers = []
     for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
         reload_context()
 
-        pairs_folder = problem / "pairs"
-        if not pairs_folder.exists():
-            continue
+        pairs = load_folder(problem / "pairs")
 
-        pairs = [pair for pair in pairs_folder.iterdir()]
-        pairs = sorted(pairs, key=lambda file: file.name)
-
-        answer = ask_model(first_prompt, pairs[0])
-        for pair in pairs[1:-1]:
-            answer = ask_model(iterative_prompt, pair)
-
-        answer = ask_model(last_prompt, pairs[-1])
-
+        answer = get_iterative_concept(pairs, ask_model, prompts)
         answers.append(AnswerItem(problem=problem.name, answer=answer))
 
     return InferenceResult(prompts=prompts, model=setup["model"], answers=answers)
