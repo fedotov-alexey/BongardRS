@@ -87,6 +87,40 @@ def direct(ask_model, reload_context, setup) -> InferenceResult:
 
     return InferenceResult(prompts=prompts, model=setup["model"], answers=answers)
 
+def contrastive_direct(ask_model, reload_context, setup) -> InferenceResult:
+    prompts = setup["prompts"]
+    pair_prompt = prompts[0]
+    collage_prompt = prompts[2]
+
+    folder_path = Path(setup["dataset"])
+    tasks_folders = [file for file in folder_path.iterdir()]
+    tasks_folders = sorted(tasks_folders, key=lambda folder: folder.name)
+
+    answers = []
+    for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
+        reload_context()
+
+        collage = problem / "collage.png"
+        if not collage.exists():
+            continue
+
+        pairs_folder = problem / "pairs"
+        if not pairs_folder.exists():
+            continue
+
+        pairs = [pair for pair in pairs_folder.iterdir()]
+        pairs = sorted(pairs, key=lambda file: file.name)
+
+        task_answers = []
+        for pair in pairs:
+            task_answers.append(ask_model(pair_prompt, pair))
+
+        answer = ask_model(collage_prompt, collage)
+        
+        answers.append(AnswerItem(problem=problem.name, answer=answer))
+
+    return InferenceResult(prompts=prompts, model=setup["model"], answers=answers)
+
 
 def contrastive_iterative(ask_model, reload_context, setup) -> InferenceResult:
     prompts = setup["prompts"]
