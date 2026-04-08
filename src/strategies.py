@@ -1,14 +1,14 @@
 import json
 
 from collections.abc import Callable
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime
 from json import JSONDecodeError
+from logging import getLogger
 from pathlib import Path
 from tqdm import tqdm
-from typing import List, Dict
+from typing import List, Dict, Any
 
-from logging import getLogger
 
 log = getLogger(__name__)
 
@@ -139,22 +139,7 @@ class Setup:
         except JSONDecodeError as e:
             raise SetupLoadError(f"Invalid JSON in setup file {path}: {e}") from e
 
-        required_fields = {"strategy", "prompt", "dataset", "model"}
-        missing = required_fields - set(data.keys())
-        if missing:
-            raise SetupLoadError(f"Setup file missing keys: {missing}")
-
-        if not isinstance(data["prompt"], list) or not all(
-            isinstance(p, str) for p in data["prompt"]
-        ):
-            raise SetupLoadError("'prompt' must be a list of strings")
-
-        if not all(
-            isinstance(data[field], str) for field in ["model", "dataset", "strategy"]
-        ):
-            raise SetupLoadError(
-                "'model', 'dataset', 'strategy' fields must be strings"
-            )
+        cls._validate_fields(data)
 
         return cls(
             strategy=data["strategy"],
@@ -162,6 +147,36 @@ class Setup:
             dataset=data["dataset"],
             model=data["model"],
         )
+
+    @classmethod
+    def _validate_fields(cls, data: dict[str, Any]) -> None:
+        required_fields = {f.name for f in fields(cls)}
+        missing = required_fields - set(data.keys())
+        if missing:
+            raise SetupLoadError(f"Setup file missing required keys: {missing}")
+
+        for f in fields(cls):
+            value = data[f.name]
+            if not cls._type_match(value, f.type):
+                raise SetupLoadError(
+                    f"Field '{f.name}' type mismatch: expected {f.type}, got {type(value).__name__}"
+                )
+
+    @classmethod
+    def _type_match(cls, value, expected_type):
+        from typing import get_origin, get_args
+
+        origin = get_origin(expected_type)
+        if origin is None:
+            return isinstance(value, expected_type)
+
+        if origin is list:
+            if not isinstance(value, list):
+                return False
+            (item_type,) = get_args(expected_type)
+            return all(isinstance(item, item_type) for item in value)
+
+        return isinstance(value, origin)
 
 
 def load_folder(folder: Path) -> List[Path]:
