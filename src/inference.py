@@ -2,7 +2,7 @@ import os
 import pathlib
 import json
 
-from strategies import load_setup, direct, InferenceResult
+from strategies import Setup, direct, InferenceResult
 
 def ask_model(prompt, image):
     if image.exists():
@@ -14,7 +14,7 @@ def reload_model():
 
 if __name__ == "__main__":
     # inference model
-    setup = load_setup("sample_setup.json")
+    setup = Setup.load("sample_setup.json")
     results = direct(ask_model, reload_model, setup)
     results.save_as_json("results.json")
 

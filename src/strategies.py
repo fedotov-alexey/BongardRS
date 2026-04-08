@@ -8,6 +8,7 @@ from logging import getLogger
 from pathlib import Path
 from tqdm import tqdm
 from typing import List, Dict, Any
+from typeguard import check_type, TypeCheckError
 
 
 log = getLogger(__name__)
@@ -66,8 +67,8 @@ class InferenceResult:
 
     @classmethod
     def from_dict(cls, dict_data: Dict):
-        """Create InferenceResult from dictionary"""
-        required_keys = {"prompts", "model", "answers", "end_time"}
+        """Create InferenceResult from a dictionary"""
+        required_keys = {f.name for f in fields(cls)}
 
         if not required_keys.issubset(dict_data.keys()):
             missing = required_keys - dict_data.keys()
@@ -91,11 +92,11 @@ class InferenceResult:
 
     @classmethod
     def from_json_string(cls, json_data: str):
-        """Create InferenceResult from JSON string"""
+        """Create InferenceResult from a JSON string"""
         try:
             data = json.loads(json_data)
         except JSONDecodeError as e:
-            raise InferenceResultLoadError(f"Invalid JSON: {e}") from e
+            raise InferenceResultLoadError(f"JSON decode error: {str(e)}") from e
 
         return cls.from_dict(data)
 
@@ -112,9 +113,9 @@ class InferenceResult:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
         except JSONDecodeError as e:
-            raise InferenceResultLoadError(f"Invalid JSON in {path}: {e}") from e
-        except UnicodeDecodeError as e:
-            raise InferenceResultLoadError(f"Encoding error in {path}: {e}") from e
+            raise InferenceResultLoadError(
+                f"JSON decode error for file {path}: {str(e)}"
+            ) from e
 
         return cls.from_dict(data)
 
@@ -141,12 +142,10 @@ class Setup:
 
         cls._validate_fields(data)
 
-        return cls(
-            strategy=data["strategy"],
-            prompts=data["prompt"],
-            dataset=data["dataset"],
-            model=data["model"],
-        )
+        field_names = {f.name for f in fields(cls)}
+        init_kwargs = {name: data[name] for name in field_names}
+
+        return cls(**init_kwargs)
 
     @classmethod
     def _validate_fields(cls, data: dict[str, Any]) -> None:
@@ -157,26 +156,13 @@ class Setup:
 
         for f in fields(cls):
             value = data[f.name]
-            if not cls._type_match(value, f.type):
+            try:
+                check_type(value, f.type)
+            except TypeCheckError as e:
                 raise SetupLoadError(
-                    f"Field '{f.name}' type mismatch: expected {f.type}, got {type(value).__name__}"
-                )
-
-    @classmethod
-    def _type_match(cls, value, expected_type):
-        from typing import get_origin, get_args
-
-        origin = get_origin(expected_type)
-        if origin is None:
-            return isinstance(value, expected_type)
-
-        if origin is list:
-            if not isinstance(value, list):
-                return False
-            (item_type,) = get_args(expected_type)
-            return all(isinstance(item, item_type) for item in value)
-
-        return isinstance(value, origin)
+                    f"Error during loading a setup file. Type mismatch in setup field '{f.name}': "
+                    f"expected {f.type.__name__}, got {type(value).__name__}. Message from type checker: {str(e)}."
+                ) from None
 
 
 def load_folder(folder: Path) -> List[Path]:
@@ -226,7 +212,7 @@ def direct(
     for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
         collage = problem / "collage.png"
         if not collage.is_file():
-            log.debug("Skipping problem %s: no collage.png", problem.name)
+            log.error("Skipping problem %s: no collage.png", problem.name)
             continue
 
         reload_context()
@@ -258,14 +244,14 @@ def descriptive_direct(
 
         collage = problem / "collage.png"
         if not collage.is_file():
-            log.debug("Skipping problem %s: no collage.png", problem.name)
+            log.error("Skipping problem %s: no collage.png", problem.name)
             continue
 
         try:
             lefts = load_folder(problem / "left")
             rights = load_folder(problem / "right")
         except InvalidDataset:
-            log.debug(
+            log.error(
                 "Skipping problem %s: missing left/right subfolders", problem.name
             )
             continue
@@ -296,14 +282,14 @@ def descriptive_iterative(
 
         collage = problem / "collage.png"
         if not collage.is_file():
-            log.debug("Skipping problem %s: no collage.png", problem.name)
+            log.error("Skipping problem %s: no collage.png", problem.name)
             continue
 
         try:
             lefts = load_folder(problem / "left")
             rights = load_folder(problem / "right")
         except InvalidDataset:
-            log.debug(
+            log.error(
                 "Skipping problem %s: missing left/right subfolders", problem.name
             )
             continue
@@ -335,13 +321,13 @@ def contrastive_direct(
 
         collage = problem / "collage.png"
         if not collage.is_file():
-            log.debug("Skipping problem %s: no collage.png", problem.name)
+            log.error("Skipping problem %s: no collage.png", problem.name)
             continue
 
         try:
             pairs = load_folder(problem / "pairs")
         except InvalidDataset:
-            log.debug("Skipping problem %s: missing pairs subfolder", problem.name)
+            log.error("Skipping problem %s: missing pairs subfolder", problem.name)
             continue
         pairs_decs = get_descriptions(pairs, ask_model, pair_prompt)
 
@@ -368,7 +354,7 @@ def contrastive_iterative(
         try:
             pairs = load_folder(problem / "pairs")
         except InvalidDataset:
-            log.debug("Skipping problem %s: missing pairs subfolder", problem.name)
+            log.error("Skipping problem %s: missing pairs subfolder", problem.name)
             continue
 
         answer = get_iterative_concept(pairs, ask_model, prompts)
