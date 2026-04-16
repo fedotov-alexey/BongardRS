@@ -1,4 +1,3 @@
-
 import json
 import sys
 from datetime import datetime
@@ -6,12 +5,14 @@ from pathlib import Path
 from typing import Dict, List
 from reader import load_sorted_data
 
+
 class ResultSet:
     def __init__(
         self,
         results_path: Path,
         images_folder: Path,
         evaluation_path: Path = Path("evaluation.json"),
+        tasks_to_remove: list[str] = [],
     ):
         """
         Инициализация программы
@@ -20,13 +21,16 @@ class ResultSet:
             images_folder: путь к папке с изображениями
             evaluation_path: путь к файлу с отзывами
         """
+        self.tasks_to_remove: list[str] = tasks_to_remove
         self.results_path = results_path
         self.images_folder = images_folder
         self.evaluation_path = evaluation_path
         self.data: dict[str, list[dict[str, str]]] = {}  # General data
         self.users: Dict[str, Dict[str, str]] = {}  # Users info
-        self.user_tasks: Dict[str, List[Dict[str, str | int]]] = {}  # Tasks answers by users
-        self.evaluations: Dict[str, Dict[str, Dict[str, str | int]]] = {} 
+        self.user_tasks: Dict[str, List[Dict[str, str | int]]] = (
+            {}
+        )  # Tasks answers by users
+        self.evaluations: Dict[str, Dict[str, Dict[str, str | int]]] = {}
         # Tasks with evaluations by tasks (tasks[user ids[task responses + evaluation]])
 
         self.load_results()
@@ -47,7 +51,7 @@ class ResultSet:
             with open(self.results_path, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
 
-        self._exclude_tasks(["bb_m_99.png", "bb_s_38.png", "bb_m_48.png"])
+        self._exclude_tasks(self.tasks_to_remove)
 
         # data setup
         for user_id, records in self.data.items():
@@ -73,9 +77,9 @@ class ResultSet:
                         "time": timestamp_difference(
                             records[i - 1].get("timestamp", "N/A"),
                             record.get("timestamp", "N/A"),
-                        ), 
+                        ),
                     }
-                    self.user_tasks[user_id].append(task_info)     
+                    self.user_tasks[user_id].append(task_info)
                 elif record.get("response_type") == "email_submission":
                     self.users[user_id]["email"] = record["email"]
 
@@ -92,28 +96,35 @@ class ResultSet:
                         evaluations[img_name] = {}
                     if user_id not in evaluations[img_name]:
                         empty_eval = {
-                        "user_id": user_id,
-                        "username": record["username"],
-                        "left_answer": record["left_answer"],
-                        "right_answer": record["right_answer"],
-                        "time": timestamp_difference(
+                            "user_id": user_id,
+                            "username": record["username"],
+                            "left_answer": record["left_answer"],
+                            "right_answer": record["right_answer"],
+                            "time": timestamp_difference(
                                 records[i - 1]["timestamp"],
-                                record.get("timestamp", "N/A")),
-                        "evaluation": "",
-                    }
+                                record.get("timestamp", "N/A"),
+                            ),
+                            "evaluation": "",
+                        }
                         evaluations[img_name][user_id] = empty_eval
 
-    def _exclude_tasks(self, tasks:list[str]):
-        
+    def _exclude_tasks(self, tasks: list[str]):
+
         full_data = self.data
         for userid in full_data:
-            to_del:list[int] = []
-            for i, task in enumerate(full_data[userid]):
-                if task["response_type"] == "task_answer":
-                    if task["test_image"] in tasks:
-                        to_del.append(i)
-            full_data[userid] = [item for idx, item in enumerate(full_data[userid]) if idx not in to_del]
-    
+            to_del: list[int] = []
+            if tasks:
+                for i, task in enumerate(full_data[userid]):
+                    if task["response_type"] == "task_answer":
+                        if task["test_image"] in tasks:
+                            to_del.append(i)
+                full_data[userid] = [
+                    item
+                    for idx, item in enumerate(full_data[userid])
+                    if idx not in to_del
+                ]
+
+
 def timestamp_difference(from_timestamp: str, to_timestamp: str) -> int:
     """Difference in seconds for to timestamps"""
 

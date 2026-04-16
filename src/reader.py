@@ -139,17 +139,16 @@ def load_sorted_data(
 
 if __name__ == "__main__":
 
-    folder = "bongard_0303_test"
-    input_file = "data/Bongard_0303.ldj"  # Change this to your input file path
+    input_file = Path(...)  # Change this to your input file path
+    output_path = Path(...)
 
-    Path("data/" + folder).mkdir(parents=True, exist_ok=True)
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    group_file = "data/" + folder + "/grouped_data.json"
-    summary_file = "data/" + folder + "/data_summary.json"
+    clean_file = output_path / "clean_data.json"
+    group_file = output_path / "grouped_data.json"
 
     # Parse and clean the data
-    parsed_data = clean_data(input_file, dump=False, timestamp="20260402T165704")
+    parsed_data = clean_data(
+        input_file, dump=True, output_file=clean_file, timestamp="20260402T165704"
+    )
     sorted_data = sort_data(parsed_data, full=True, dump=True, output_path=group_file)
-
-    print("\nDone! Files created:")
-    print(f"  - {summary_file}: Statistics summary")

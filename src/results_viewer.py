@@ -9,16 +9,21 @@ from copy import deepcopy
 import time
 from results_set import ResultSet, timestamp_difference
 
+
 class TestResultsViewer:
-    def __init__(self,
+    def __init__(
+        self,
         results_path: Path,
         images_folder: Path,
         evaluation_path: Path = Path("evaluation.json"),
-        ) -> None:
+    ) -> None:
+        tasks_to_remove = ["bb_m_99.png", "bb_s_38.png", "bb_m_48.png"]
         self.results_path = results_path
         self.images_folder = images_folder
         self.evaluation_path = evaluation_path
-        results = ResultSet(results_path, images_folder, evaluation_path)
+        results = ResultSet(
+            results_path, images_folder, evaluation_path, tasks_to_remove
+        )
         self.data = results.data
         self.users = results.users
         self.user_tasks = results.user_tasks
@@ -32,7 +37,6 @@ class TestResultsViewer:
             print(f"  Предупреждение: Изображение {image_name} не найдено!")
             return False
 
-        # Определяем команду для открытия в зависимости от ОС
         if sys.platform == "win32":
             os.startfile(image_path)
         elif sys.platform == "darwin":  # macOS
@@ -45,25 +49,22 @@ class TestResultsViewer:
                     .strip()
                 )
 
-                # Открываем изображение
                 subprocess.Popen(["xdg-open", image_path])
                 time.sleep(0.5)
 
-                # Перемещаем новое окно на правую половину
                 new_window = (
                     subprocess.check_output(["xdotool", "getactivewindow"])
                     .decode()
                     .strip()
                 )
 
-                # Получаем размер экрана
                 screen_width = int(
                     subprocess.check_output(["xdotool", "getdisplaygeometry"])
                     .decode()
                     .split()[0]
                 )
 
-                # Перемещаем окно просмотрщика
+                # move window
                 subprocess.run(
                     [
                         "wmctrl",
@@ -75,7 +76,6 @@ class TestResultsViewer:
                     ]
                 )
 
-                # Возвращаем фокус на исходное окно
                 subprocess.run(["xdotool", "windowactivate", current_window])
 
                 print(f"  Изображение открыто справа, фокус возвращен")
@@ -85,7 +85,7 @@ class TestResultsViewer:
                 print(
                     f"  Установите wmctrl и xdotool: sudo apt-get install wmctrl xdotool"
                 )
-                # Fallback - просто открываем изображение
+                # Fallback
                 subprocess.Popen(["xdg-open", image_path])
 
         return True
@@ -125,7 +125,7 @@ class TestResultsViewer:
             self.show_image(selected_image)
 
             # Show responses
-            responses = evaluations[selected_image] # non subsriptable
+            responses = evaluations[selected_image]
             print(f"\nОтветы на изображение '{selected_image}':")
             print("-" * 50)
 
@@ -164,7 +164,6 @@ class TestResultsViewer:
         print("ПРОСМОТР ОТВЕТОВ ПОЛЬЗОВАТЕЛЯ")
         print("=" * 60)
 
-        # Список пользователей
         users_list = list(self.users.keys())
         if not users_list:
             print("Нет данных о пользователях!")
@@ -177,7 +176,6 @@ class TestResultsViewer:
                 f"  {i}. {user_info['username']} (возраст: {user_info['age']}, пол: {user_info['sex']})"
             )
 
-        # Выбор пользователя
         while True:
             try:
                 choice = input(
@@ -195,7 +193,6 @@ class TestResultsViewer:
             except ValueError:
                 print("Пожалуйста, введите корректное число")
 
-        # Получаем задачи пользователя
         tasks = self.user_tasks.get(selected_user, [])
         if not tasks:
             raise ValueError(
@@ -217,7 +214,6 @@ class TestResultsViewer:
             print(f"   Время: {task['time']} сек")
             print()
 
-        # Выбор задания для просмотра
         while True:
             try:
                 choice = input(
@@ -280,8 +276,6 @@ class TestResultsViewer:
         total_users = len(self.users)
         total_tasks = sum(len(tasks) for tasks in self.user_tasks.values())
         total_images = len(self.evaluations)
-
-        # Подсчет ответов по полу и возрасту
         male_count = sum(1 for u in self.users.values() if u["sex"].lower() == "m")
         female_count = sum(1 for u in self.users.values() if u["sex"].lower() == "f")
         emails = sum(1 for u in self.users.values() if "@" in u["email"].lower())
@@ -291,9 +285,9 @@ class TestResultsViewer:
         tasks_correct = 0.0
         for task in evals:
             tasks_correct += calc_correct_task(evals[task])
-        norm_correct = tasks_correct / len(evals) *  100
+        norm_correct = tasks_correct / len(evals) * 100
         tasks_correct, tasks_wrong, tasks_other, tasks_unrated = 0, 0, 0, 0
-        
+
         for task in evals:
             for user in evals[task]:
                 if evals[task][user]["evaluation"] == "y":
@@ -304,33 +298,42 @@ class TestResultsViewer:
                     tasks_unrated += 1
                 else:
                     tasks_other += 1
-        # Общее количество задач
         total_tasks = tasks_correct + tasks_wrong + tasks_other + tasks_unrated
-        # Проверенные задачи (correct + wrong + other)
         checked_tasks = tasks_correct + tasks_wrong + tasks_other
-        # Верные + неверные (без other)
         correct_wrong_total = tasks_correct + tasks_wrong
-        # Проценты (с защитой от деления на 0)
         checked_percent = (checked_tasks / total_tasks * 100) if total_tasks else 0
-        correct_percent_total = (tasks_correct / total_tasks * 100) if total_tasks else 0
-        correct_percent_checked = (tasks_correct / checked_tasks * 100) if checked_tasks else 0
-        correct_percent_cw = (tasks_correct / correct_wrong_total * 100) if correct_wrong_total else 0
+        correct_percent_total = (
+            (tasks_correct / total_tasks * 100) if total_tasks else 0
+        )
+        correct_percent_checked = (
+            (tasks_correct / checked_tasks * 100) if checked_tasks else 0
+        )
+        correct_percent_cw = (
+            (tasks_correct / correct_wrong_total * 100) if correct_wrong_total else 0
+        )
 
         print(f"\nВсего пользователей: {total_users}")
         print(f"Всего собрано ответов: {total_tasks}")
         print(f"Всего email адресов: {emails}")
         print(f"Уникальных задач: {total_images}")
-        print(f"Количество проверенных ответов: {checked_tasks} ({checked_percent:.2f}%)")
+        print(
+            f"Количество проверенных ответов: {checked_tasks} ({checked_percent:.2f}%)"
+        )
         print(f"Верные ответы от всех: {tasks_correct} ({correct_percent_total:.2f}%)")
-        print(f"Верные от проверенных: {tasks_correct} ({correct_percent_checked:.2f}%)")
-        print(f"Верные из имеющих точную оценку: {tasks_correct} ({correct_percent_cw:.2f}%)")
-        print(f"Нормализованный процент верных решений: ({norm_correct:.2f}%) \n(C учетом разного количества ответов на разные задачи)")
+        print(
+            f"Верные от проверенных: {tasks_correct} ({correct_percent_checked:.2f}%)"
+        )
+        print(
+            f"Верные из имеющих точную оценку: {tasks_correct} ({correct_percent_cw:.2f}%)"
+        )
+        print(
+            f"Нормализованный процент верных решений: ({norm_correct:.2f}%) \n(C учетом разного количества ответов на разные задачи)"
+        )
         print(f"\nДемография:")
         print(f"  Мужчины: {male_count}")
         print(f"  Женщины: {female_count}")
         print(f"  Средний возраст: {avg_age:.1f}")
 
-        # Распределение по роду занятий
         occupations = defaultdict(int)
         for u in self.users.values():
             occupations[u["occupation"]] += 1
@@ -347,7 +350,6 @@ class TestResultsViewer:
         print("СТАТИСТИКА ПО ПОЛЬЗОВАТЕЛЯМ")
         print("-" * 50)
 
-        # Сортируем пользователей по количеству заданий
         user_stats = []
         for user_id, tasks in self.user_tasks.items():
             user_info = self.users.get(user_id, {})
@@ -387,7 +389,6 @@ class TestResultsViewer:
         print("СТАТИСТИКА ПО ЗАДАНИЯМ")
         print("-" * 50)
 
-        # Сортируем изображения по количеству ответов
         task_stats: list[dict[str, str | int | float]] = []
         for image_name, responses in self.evaluations.items():
             sum_time = 0
@@ -407,7 +408,7 @@ class TestResultsViewer:
         task_stats.sort(
             key=lambda x: x["response_count"], reverse=True
         )  # Sorting tasks stats
-        numbers = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]
+        numbers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         counts = [0] * 20
 
         if create_json:
@@ -433,7 +434,6 @@ class TestResultsViewer:
                 f"{i:<3} {stats['image']:<15} {stats['response_count']:<15} {stats['correct']:<10.1%} {stats['mean_time']:.1f}"
             )
 
-        # Опция просмотра деталей по конкретному изображению
         print("\nХотите посмотреть ответы на конкретное изображение?")
         choice = input(
             "Введите номер изображения из списка (или 'n' для выхода): "
@@ -589,6 +589,7 @@ class TestResultsViewer:
             if any(check(u["evaluation"]) for u in evals.values())
         }
 
+
 def calc_correct_task(
     response: Dict[str, Dict[str, str]],
 ) -> float:  # correct answers percentage for one task
@@ -617,9 +618,9 @@ def main():
     print("=" * 60)
 
     # Получение путей от пользователя
-    json_path = Path("/mnt/storage/bong_bench/BongardRS/data/bong_16_04/Bongard(4).ldj")
-    images_folder = Path("/mnt/storage/bong_bench/FTP")
-    evaluation_path = Path("/mnt/storage/bong_bench/BongardRS/data/eval_1.json")
+    json_path = Path(...)
+    images_folder = Path(...)
+    evaluation_path = Path(...)  # Could not exist
 
     # Создаем и запускаем приложение
     app = TestResultsViewer(json_path, images_folder, evaluation_path)
