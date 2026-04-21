@@ -16,19 +16,20 @@ class TestResultsViewer:
         results_path: Path,
         images_folder: Path,
         evaluation_path: Path = Path("evaluation.json"),
+        mode: Literal["human", "model"] = "human"
     ) -> None:
         tasks_to_remove = ["bb_m_99.png", "bb_s_38.png", "bb_m_48.png"]
         self.results_path = results_path
         self.images_folder = images_folder
         self.evaluation_path = evaluation_path
         results = ResultSet(
-            results_path, images_folder, evaluation_path, tasks_to_remove
+            results_path, images_folder, evaluation_path, tasks_to_remove, mode=mode
         )
         self.data = results.data
         self.users = results.users
         self.user_tasks = results.user_tasks
         self.evaluations = results.evaluations
-
+        self.mode = mode
     def show_image(self, image_name: str):
         """Show image"""
         image_path = self.images_folder / image_name
@@ -132,7 +133,8 @@ class TestResultsViewer:
             for i, resp in enumerate(responses.values(), 1):
                 print(f"{i}. Пользователь: {resp['username']}")
                 print(f"   Левый ответ: {resp['left_answer']}")
-                print(f"   Правый ответ: {resp['right_answer']}")
+                if self.mode == "human":
+                    print(f"   Правый ответ: {resp['right_answer']}")
                 print()
 
             print("-" * 50)
@@ -211,7 +213,8 @@ class TestResultsViewer:
         for i, task in enumerate(tasks, 1):
             print(f"{i}. Изображение: {task['test_image']}")
             print(f"   Ответ: {task['left_answer']} / {task['right_answer']}")
-            print(f"   Время: {task['time']} сек")
+            if self.mode == "human":
+                print(f"   Время: {task['time']} сек")
             print()
 
         while True:
@@ -484,7 +487,8 @@ class TestResultsViewer:
             ):
                 print(f"\nОтветы {user_id}:")
                 print({answer["left_answer"]})
-                print({answer["right_answer"]})
+                if self.mode == "human":
+                    print({answer["right_answer"]}) 
                 if answer["evaluation"] == "":
                     print(
                         "Оценки нет, введите 'y' если ответ верный, 'n' если неверный"
@@ -618,12 +622,16 @@ def main():
     print("=" * 60)
 
     # Получение путей от пользователя
-    json_path = Path(...)
-    images_folder = Path(...)
-    evaluation_path = Path(...)  # Could not exist
+    # json_path = Path("data/results_qwen.json")
+    # json_path = Path("data/results.json")
+    json_path = Path("data/bong_21_4/Bongard(4).ldj")
+    images_folder = Path("/mnt/storage/bong_bench/FTP")
+    # evaluation_path = Path("data/eval_models1.json") # Could not exist
+    evaluation_path = Path("data/eval1.json") # Could not exist
 
     # Создаем и запускаем приложение
-    app = TestResultsViewer(json_path, images_folder, evaluation_path)
+    app = TestResultsViewer(json_path, images_folder, evaluation_path, mode = "human")
+    app = TestResultsViewer(json_path, images_folder, evaluation_path, mode = "human")
     app.main_menu()
 
 

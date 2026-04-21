@@ -10,12 +10,15 @@ class HumanAnswerItem:
     answer: str
     seed: str
 
+def clean_model_data():
+    pass
 
 def clean_data(
     input_file: Path,
     dump: bool = True,
     output_file: Path = Path("parsed_data"),
     timestamp: str = "20260402T165704",
+    mode:str = "human"
 ) -> list[dict[str, str | int]]:
     """
     Parse experiment data from JSONL format, extract only the response data
@@ -25,69 +28,107 @@ def clean_data(
     parsed_data: list[dict[str, str | int]] = []
 
     with open(input_file, "r", encoding="utf-8") as f:
-        for line_num, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-                if record.get("ts") < timestamp:
+        if mode == "human":
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
                     continue
+                try:
+                    record = json.loads(line)
+                    if record.get("ts") < timestamp:
+                        continue
+
+                    # Extract only the data we need
+                    extracted: dict[str, str | int] = {
+                        "username": record.get("username"),
+                        "timestamp": record.get("ts"),
+                        "seed": record.get("seed"),
+                    }
+
+                    # Extract response data
+                    response = record.get("response", {})
+
+                    # Check if this is a questionnaire response (has age, occupation, sex)
+                    if "age" in response or "occupation" in response or "sex" in response:
+                        extracted["response_type"] = "form"
+                        extracted["age"] = response.get("age", "")
+                        extracted["sex"] = response.get("sex", "")
+                        extracted["occupation"] = response.get("occupation", "")
+
+                    # Check if this is an answer to a task (has left_ans and right_ans)
+                    elif "left_ans" in response or "right_ans" in response:
+                        extracted["response_type"] = "task_answer"
+                        extracted["left_answer"] = response.get("left_ans", "")
+                        extracted["right_answer"] = response.get("right_ans", "")
+
+                    # Check if this is a "don't know" response
+                    elif response.get("response") == "Не знаю":
+                        extracted["response_type"] = "dont_know"
+                        extracted["left_answer"] = "Не знаю"
+                        extracted["right_answer"] = "Не знаю"
+
+                    # Check if this is instruction navigation
+                    elif response.get("response") in [
+                        "Продолжить",
+                        "Перейти к решению задач",
+                    ]:
+                        continue
+
+                    # Check if this is email submission
+                    elif "email" in response:
+                        extracted["response_type"] = "email_submission"
+                        extracted["email"] = response.get("email", "")
+
+                    # Extract test frame path if exists
+                    test = record.get("test", {})
+                    frames = test.get("frames", [])
+                    if frames and len(frames) > 0:
+                        image_path = frames[0].get("path", "")
+                        extracted["test_image"] = encode(image_path, "rot_13")
+
+                    parsed_data.append(extracted)
+
+                except json.JSONDecodeError as e:
+                    print(f"Error parsing line {line_num}: {e}")
+                    continue
+        elif mode == "model":
+            try:
+                record = json.load(f)
+                # if record.get("ts") < timestamp:
+                #     continue
 
                 # Extract only the data we need
-                extracted: dict[str, str | int] = {
-                    "username": record.get("username"),
-                    "timestamp": record.get("ts"),
-                    "seed": record.get("seed"),
-                }
+                modelname = record.get("model")
+                end_time  = record.get("end_time")
+                seed = record.get("end_time")
+
 
                 # Extract response data
-                response = record.get("response", {})
+                strategies = record["results"]
+                for strat in strategies:
+                    response = strat["answers"]
+                    for ans in response:
+                        extracted: dict[str, str | int] = {
+                        "username": (f"{modelname}, {strat['strategy']}"),
+                        "timestamp": end_time,
+                        "seed": seed,
+                        "strategy": strat["strategy"],
+                        "modelname": modelname
+                        }
+                        image_path = (f'{ans.get("problem")}.png')
+                        extracted["test_image"] = image_path
+                        # Check if this is an answer to a task (has left_ans and right_ans)
+                        extracted["response_type"] = "task_answer"
+                        extracted["left_answer"] = ans.get("answer", "")
+                        extracted["right_answer"] = ans.get("answer", "")
 
-                # Check if this is a questionnaire response (has age, occupation, sex)
-                if "age" in response or "occupation" in response or "sex" in response:
-                    extracted["response_type"] = "form"
-                    extracted["age"] = response.get("age", "")
-                    extracted["sex"] = response.get("sex", "")
-                    extracted["occupation"] = response.get("occupation", "")
-
-                # Check if this is an answer to a task (has left_ans and right_ans)
-                elif "left_ans" in response or "right_ans" in response:
-                    extracted["response_type"] = "task_answer"
-                    extracted["left_answer"] = response.get("left_ans", "")
-                    extracted["right_answer"] = response.get("right_ans", "")
-
-                # Check if this is a "don't know" response
-                elif response.get("response") == "Не знаю":
-                    extracted["response_type"] = "dont_know"
-                    extracted["left_answer"] = "Не знаю"
-                    extracted["right_answer"] = "Не знаю"
-
-                # Check if this is instruction navigation
-                elif response.get("response") in [
-                    "Продолжить",
-                    "Перейти к решению задач",
-                ]:
-                    continue
-
-                # Check if this is email submission
-                elif "email" in response:
-                    extracted["response_type"] = "email_submission"
-                    extracted["email"] = response.get("email", "")
-
-                # Extract test frame path if exists
-                test = record.get("test", {})
-                frames = test.get("frames", [])
-                if frames and len(frames) > 0:
-                    encoded_path = frames[0].get("path", "")
-                    extracted["test_image"] = encode(encoded_path, "rot_13")
-
-                parsed_data.append(extracted)
-
+                        parsed_data.append(extracted)
+            
+            
             except json.JSONDecodeError as e:
-                print(f"Error parsing line {line_num}: {e}")
-                continue
-
+                print(f"Error parsing file: {e}")
+    print(f"type of data{type(parsed_data)}")
+    # breakpoint()
     # Save to JSON file
     if dump:
         with open(output_file, "w", encoding="utf-8") as f:
@@ -103,12 +144,12 @@ def sort_data(
     full: bool = True,
     dump: bool = True,
     output_path: Path = Path("sorted_data.json"),
+    entry_amount: int = 22
 ) -> dict[str, list[dict[str, str | int]]]:
     """
     Full: return only completed tests
     """
     unique_users: dict[str, list[dict[str, str | int]]] = {}
-    entry_amount: int = 22
     for item in clean_data:
         id = str(item["seed"]) + item["username"]
         if id not in unique_users:
@@ -117,7 +158,8 @@ def sort_data(
     if full:
         to_del: list[str] = []
         for key, value in unique_users.items():
-            if len(value) != entry_amount:
+            if len(value) < entry_amount:
+                print(f"{len(value)} < {entry_amount}")
                 to_del.append(key)
                 print(f"{key} did not complete the experiment")
         [unique_users.pop(key) for key in to_del]
@@ -127,28 +169,44 @@ def sort_data(
     return unique_users
 
 
-def load_sorted_data(
+def load_human_data(
     input_file: Path, timestamp: str = "20260402T165704"
 ) -> dict[str, list[dict[str, str | int]]]:
-    parsed_data = clean_data(input_file, dump=False, timestamp=timestamp)
+    parsed_data = clean_data(input_file, dump=False, timestamp=timestamp, mode="human")
     sorted_data = sort_data(
-        parsed_data, full=True, dump=True, output_path=Path("grouped_relevant.json")
+        parsed_data, full=True, dump=False, output_path=Path("grouped_relevant.json"), entry_amount=22
     )
     return sorted_data
 
+def load_model_data(input_file: Path) -> dict[str, list[dict[str, str | int]]]:
+
+    parsed_data = clean_data(input_file, dump=False, mode="model")
+
+    sorted_data = sort_data(
+        parsed_data, full=False, dump=False, output_path=Path("grouped_relevant.json")
+    )
+    return sorted_data
 
 if __name__ == "__main__":
 
-    input_file = Path(...)  # Change this to your input file path
-    output_path = Path(...)
+    input_file = Path("data/results.json")  # Change this to your input file path
+    # input_file = Path("data/bong_17_04/Bongard(4).ldj")  # Change this to your input file path
+    output_dir_path = Path("data/bong_17_04")
 
-    output_path.mkdir(parents=True, exist_ok=True)
+    output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    clean_file = output_path / "clean_data.json"
-    group_file = output_path / "grouped_data.json"
+    clean_file = output_dir_path / "clean_data.json"
+    group_file = output_dir_path / "grouped_data.json"
 
     # Parse and clean the data
     parsed_data = clean_data(
-        input_file, dump=True, output_file=clean_file, timestamp="20260402T165704"
+        input_file, dump=True, output_file=clean_file, timestamp="20260402T165704", mode = "model",
     )
-    sorted_data = sort_data(parsed_data, full=True, dump=True, output_path=group_file)
+    sorted_data = sort_data(parsed_data, full=True, dump=True, output_path=group_file, entry_amount=20)
+
+
+# dict_keys(['username', 'timestamp', 'seed', 'response_type', 'age', 'sex', 'occupation'])
+# (Pdb) (parsed_data[1]).keys()
+# dict_keys(['username', 'timestamp', 'seed', 'response_type', 'left_answer', 'right_answer', 'test_image'])dict_keys(['username', 'timestamp', 'seed', 'response_type', 'age', 'sex', 'occupation'])
+# (Pdb) (parsed_data[1]).keys()
+# dict_keys(['username', 'timestamp', 'seed', 'response_type', 'left_answer', 'right_answer', 'test_image'])
