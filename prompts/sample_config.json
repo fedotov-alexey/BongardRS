@@ -1,0 +1,49 @@
+{
+    "strategies": [
+        {
+            "strategy": "direct",
+            "prompts": [
+                "prompt for single question to model"
+            ]
+        },
+        {
+            "strategy": "direct",
+            "prompts": [
+                "one more prompt for direct strategy can be tested"
+            ]
+        },
+        {
+            "strategy": "contrastive-iterative",
+            "prompts": [
+                "prompt for first pair to compare",
+                "prompt for iterative concept refinement",
+                "prompt for final concept refinement"
+            ]
+        },
+        {
+            "strategy": "descriptive-direct",
+            "prompts": [
+                "prompt for description of single image",
+                "prompt for concept generation with place for left descriptions {} and right descriptions {}"
+            ]
+        },
+        {
+            "strategy": "descriptive-iterative",
+            "prompts": [
+                "prompt for first image of the side",
+                "prompt for iterative description for one side",
+                "prompt for final description of the side",
+                "prompt for concept generation with place for lefts description {} and rights description {}"
+            ]
+        },
+        {
+            "strategy": "contrastive-direct",
+            "prompts": [
+                "prompt for single pair comparison",
+                "prompt for final concept generation place for per-pair comparison {}"
+            ]
+        }
+    ],
+    "dataset": "../tasks/",
+    "model": "model name for results json, does not affect anything else"
+}

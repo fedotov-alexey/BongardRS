@@ -1,23 +1,74 @@
-import json
+"""
+Prompting strategies for the Bongard benchmark.
+
+This module defines:
+- `StrategyName`: the known strategy names (e.g., `direct`, `descriptive_direct`),
+- utilities like `load_file`, `load_folder`, `get_descriptions`, `get_iterative_concept`,
+- a decorator `strategy_func` that wraps per‑strategy implementations,
+- and the strategy functions `direct`, `descriptive_direct`, etc.,
+all of which are collected into the `STRATEGIES` registry.
+
+Typical use:
+- `BongBench` imports `STRATEGIES` and runs each strategy over the dataset.
+- Internally, `strategy_func` handles dataset iteration, progress logging, and error handling;
+  each strategy function only cares about how to solve a single `problem` folder.
+
+See:
+- `results.StrategyResult` and `BenchmarkResult` for output format.
+- `config.BenchmarkConfig` for how strategy names and prompts are configured.
+"""
 
 from collections.abc import Callable
-from dataclasses import dataclass, asdict, field, fields
-from datetime import datetime
-from json import JSONDecodeError
+from enum import Enum
+from functools import wraps
 from logging import getLogger
 from pathlib import Path
 from tqdm import tqdm
-from typing import List, Dict, Any
-from typeguard import check_type, TypeCheckError
+from typing import List, Dict
 
+from results import StrategyResult, AnswerItem
 
 log = getLogger(__name__)
 
+StrategyFuncUnwrapped = Callable[
+    [Callable[[str, Path], str], Callable[[], None], List[str], Path],
+    str,
+]
 
-class InferenceResultLoadError(ValueError):
-    """Raised when InferenceResult cannot be loaded correctly."""
+StrategyFunc = Callable[
+    [Callable[[str, Path], str], Callable[[], None], List[str], Path],
+    StrategyResult,
+]
 
-    pass
+
+class StrategyName(str, Enum):
+    """
+    Known strategy names for the Bongard benchmark.
+
+    Each value corresponds to a specific prompting method (e.g., `direct`
+    sends a single prompt to the model; `descriptive_direct` first describes
+    images one-by-one, then providing a whole concept based on descriptions.).
+    """
+
+    DIRECT = "direct"
+    DESCRIPTIVE_DIRECT = "descriptive-direct"
+    DESCRIPTIVE_ITERATIVE = "descriptive-iterative"
+    CONTRASTIVE_DIRECT = "contrastive-direct"
+    CONTRASTIVE_ITERATIVE = "contrastive-iterative"
+
+
+PROMPTS_PER_STRATEGY: Dict[StrategyName, int] = {
+    StrategyName.DIRECT: 1,
+    StrategyName.DESCRIPTIVE_DIRECT: 2,
+    StrategyName.DESCRIPTIVE_ITERATIVE: 4,
+    StrategyName.CONTRASTIVE_DIRECT: 2,
+    StrategyName.CONTRASTIVE_ITERATIVE: 3,
+}
+
+COLLAGE_NAME = "collage.png"
+LEFT_FOLDER = "left"
+RIGHT_FOLDER = "right"
+PAIRS_FOLDER = "pairs"
 
 
 class InvalidDataset(ValueError):
@@ -26,146 +77,19 @@ class InvalidDataset(ValueError):
     pass
 
 
-class SetupLoadError(ValueError):
-    """Raised when Setup cannot be loaded from JSON."""
-
-    pass
-
-
-@dataclass
-class AnswerItem:
-    problem: str
-    answer: str
-
-
-@dataclass
-class InferenceResult:
-    prompts: List[str]
-    model: str
-    answers: List[AnswerItem]
-    end_time: str = field(init=False)
-
-    def __post_init__(self):
-        self.end_time = datetime.now().isoformat()
-
-    def to_json(self, indent=4):
-        """Serialize results as a json-formatted string"""
-        json_data = json.dumps(asdict(self), indent=indent, ensure_ascii=False)
-
-        return json_data
-
-    def save_as_json(self, file_path: str | None = None, indent=4):
-        """Save results as a JSON"""
-        json_string = self.to_json(indent)
-
-        if not file_path:
-            file_path = "results_" + self.model + "_" + self.end_time + ".json"
-
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(json_string)
-        return file_path
-
-    @classmethod
-    def from_dict(cls, dict_data: Dict):
-        """Create InferenceResult from a dictionary"""
-        required_keys = {f.name for f in fields(cls)}
-
-        if not required_keys.issubset(dict_data.keys()):
-            missing = required_keys - dict_data.keys()
-            raise InferenceResultLoadError(f"Missing required keys: {missing}")
-
-        if not isinstance(dict_data["answers"], list):
-            raise InferenceResultLoadError("'answers' must be a list")
-
-        answers: List[AnswerItem] = []
-        for i, ans in enumerate(dict_data["answers"]):
-            if not isinstance(ans, dict) or {"problem", "answer"} - set(ans.keys()):
-                raise InferenceResultLoadError(f"Invalid answer item at index {i}")
-            answers.append(AnswerItem(problem=ans["problem"], answer=ans["answer"]))
-
-        instance = cls(
-            prompts=dict_data["prompts"], model=dict_data["model"], answers=answers
-        )
-
-        instance.end_time = dict_data["end_time"]
-        return instance
-
-    @classmethod
-    def from_json_string(cls, json_data: str):
-        """Create InferenceResult from a JSON string"""
-        try:
-            data = json.loads(json_data)
-        except JSONDecodeError as e:
-            raise InferenceResultLoadError(f"JSON decode error: {str(e)}") from e
-
-        return cls.from_dict(data)
-
-    @classmethod
-    def load_from_json_file(cls, json_path: str):
-        """Load InferenceResult from JSON file"""
-        path = Path(json_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Results file not found: {path}")
-        if not path.is_file():
-            raise IsADirectoryError(f"Path is not a file: {path}")
-
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-        except JSONDecodeError as e:
-            raise InferenceResultLoadError(
-                f"JSON decode error for file {path}: {str(e)}"
-            ) from e
-
-        return cls.from_dict(data)
-
-
-@dataclass
-class Setup:
-    strategy: str
-    prompts: List[str]
-    dataset: str
-    model: str
-
-    @classmethod
-    def load(cls, setup_path: str):
-        """Load Setup from file"""
-        path = Path(setup_path)
-        if not path.is_file():
-            raise FileNotFoundError(f"Setup file not found as {path}")
-
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-        except JSONDecodeError as e:
-            raise SetupLoadError(f"Invalid JSON in setup file {path}: {e}") from e
-
-        cls._validate_fields(data)
-
-        field_names = {f.name for f in fields(cls)}
-        init_kwargs = {name: data[name] for name in field_names}
-
-        return cls(**init_kwargs)
-
-    @classmethod
-    def _validate_fields(cls, data: dict[str, Any]) -> None:
-        required_fields = {f.name for f in fields(cls)}
-        missing = required_fields - set(data.keys())
-        if missing:
-            raise SetupLoadError(f"Setup file missing required keys: {missing}")
-
-        for f in fields(cls):
-            value = data[f.name]
-            try:
-                check_type(value, f.type)
-            except TypeCheckError as e:
-                raise SetupLoadError(
-                    f"Error during loading a setup file. Type mismatch in setup field '{f.name}': "
-                    f"expected {f.type.__name__}, got {type(value).__name__}. Message from type checker: {str(e)}."
-                ) from None
+def load_file(file: Path) -> Path:
+    """
+    Load a file path, ensuring it exists and is a file.
+    """
+    if not file.is_file():
+        raise InvalidDataset(f"File {file} does not exist")
+    return file
 
 
 def load_folder(folder: Path) -> List[Path]:
+    """
+    Load a folder path, ensuring it exists and is a directory, then return its sorted contents.
+    """
     if not folder.exists():
         raise InvalidDataset(f"Folder does not exist: {folder}")
     if not folder.is_dir():
@@ -180,6 +104,9 @@ def load_folder(folder: Path) -> List[Path]:
 def get_descriptions(
     pics: List[Path], ask_model: Callable[[str, Path], str], prompt: str
 ) -> List[str]:
+    """
+    Ask the model to describe each image in `pics` using the same `prompt`.
+    """
     answers = []
     for pic in pics:
         answers.append(ask_model(prompt, pic))
@@ -190,6 +117,9 @@ def get_descriptions(
 def get_iterative_concept(
     pics: List[Path], ask_model: Callable[[str, Path], str], prompts: List[str]
 ) -> str:
+    """
+    Build an iterative concept over a sequence of images using the given prompts.
+    """
     answer = ask_model(prompts[0], pics[0])
     for pair in pics[1:-1]:
         answer = ask_model(prompts[1], pair)
@@ -198,166 +128,158 @@ def get_iterative_concept(
     return answer
 
 
+def strategy_func(func: StrategyFuncUnwrapped):
+    """
+    Decorator that turns a per-problem prompting strategy function into a full dataset runner.
+
+    The wrapped `func` has signature:
+
+        (ask_model, reload_context, prompts, problem: Path) -> str
+
+    This decorator:
+    - loads the dataset directory,
+    - iterates over each problem folder,
+    - calls `func` for each problem, collecting `answers` and `skipped` problems,
+    - and returns a `StrategyResult` with the full log.
+
+    Args:
+        func (StrategyFuncUnwrapped):
+            A function that solves one problem (given ask_model, reload_context, prompts, and problem path).
+
+    Returns:
+        StrategyFunc: the decorated function that operates on the whole dataset and returns a StrategyResult.
+    """
+
+    @wraps(func)
+    def wrapper(
+        ask_model: Callable[[str, Path], str],
+        reload_context: Callable[[], None],
+        prompts: List[str],
+        dataset: Path,
+    ) -> StrategyResult:
+        strategy_name = func.__name__
+
+        try:
+            tasks_folders = load_folder(dataset)
+        except InvalidDataset as e:
+            log.error("Dataset folder missing: %s", e)
+            return StrategyResult(
+                strategy=strategy_name, prompts=prompts, answers=[], skipped=[]
+            )
+
+        answers = []
+        skipped = []
+        for problem in tqdm(
+            tasks_folders,
+            desc=f"Benchmark for strategy {strategy_name:<25}",
+            unit="problem",
+        ):
+            reload_context()
+
+            try:
+                answer = func(ask_model, reload_context, prompts, problem)
+            except InvalidDataset as e:
+                log.error(f"Error during solving problem {problem.name}: {str(e)}")
+                skipped.append(problem.name)
+                continue
+
+            answers.append(AnswerItem(problem=problem.name, answer=answer))
+
+        return StrategyResult(
+            strategy=strategy_name, prompts=prompts, answers=answers, skipped=skipped
+        )
+
+    return wrapper
+
+
+@strategy_func
 def direct(
     ask_model: Callable[[str, Path], str],
     reload_context: Callable[[], None],
-    setup: Setup,
-) -> InferenceResult:
-    prompts = setup.prompts
-    folder_path = Path(setup.dataset)
-    tasks_folders = [file for file in folder_path.iterdir()]
-    tasks_folders = sorted(tasks_folders, key=lambda folder: folder.name)
-
-    answers = []
-    for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
-        collage = problem / "collage.png"
-        if not collage.is_file():
-            log.error("Skipping problem %s: no collage.png", problem.name)
-            continue
-
-        reload_context()
-        answer = ask_model(prompts[0], problem / "collage.png")
-        answers.append(AnswerItem(problem=problem.name, answer=answer))
-
-    return InferenceResult(prompts=prompts, model=setup.model, answers=answers)
+    prompts: List[str],
+    problem: Path,
+) -> str:
+    collage = load_file(problem / COLLAGE_NAME)
+    return ask_model(prompts[0], collage)
 
 
+@strategy_func
 def descriptive_direct(
     ask_model: Callable[[str, Path], str],
     reload_context: Callable[[], None],
-    setup: Setup,
-) -> InferenceResult:
-    prompts = setup.prompts
+    prompts: List[str],
+    problem: Path,
+) -> str:
     single_prompt = prompts[0]
     collage_prompt = prompts[1]
 
-    folder_path = Path(setup.dataset)
-    try:
-        tasks_folders = load_folder(folder_path)
-    except InvalidDataset as e:
-        log.error("Dataset folder missing: %s", e)
-        return InferenceResult(prompts=prompts, model=setup.model, answers=[])
+    collage = load_file(problem / COLLAGE_NAME)
 
-    answers = []
-    for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
-        reload_context()
+    lefts = load_folder(problem / "left")
+    rights = load_folder(problem / "right")
 
-        collage = problem / "collage.png"
-        if not collage.is_file():
-            log.error("Skipping problem %s: no collage.png", problem.name)
-            continue
+    lefts_desc = get_descriptions(lefts, ask_model, single_prompt)
+    reload_context()
+    rights_desc = get_descriptions(rights, ask_model, single_prompt)
 
-        try:
-            lefts = load_folder(problem / "left")
-            rights = load_folder(problem / "right")
-        except InvalidDataset:
-            log.error(
-                "Skipping problem %s: missing left/right subfolders", problem.name
-            )
-            continue
-
-        lefts_desc = get_descriptions(lefts, ask_model, single_prompt)
-        rights_desc = get_descriptions(rights, ask_model, single_prompt)
-
-        answer = ask_model(collage_prompt.format(lefts_desc, rights_desc), collage)
-        answers.append(AnswerItem(problem=problem.name, answer=answer))
-
-    return InferenceResult(prompts=prompts, model=setup.model, answers=answers)
+    return ask_model(collage_prompt.format(lefts_desc, rights_desc), collage)
 
 
+@strategy_func
 def descriptive_iterative(
     ask_model: Callable[[str, Path], str],
     reload_context: Callable[[], None],
-    setup: Setup,
-) -> InferenceResult:
-    prompts = setup.prompts
+    prompts: List[str],
+    problem: Path,
+) -> str:
+    iterative_prompts = prompts[:3]
     collage_prompt = prompts[3]
 
-    folder_path = Path(setup.dataset)
-    tasks_folders = load_folder(folder_path)
+    collage = load_file(problem / COLLAGE_NAME)
 
-    answers = []
-    for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
-        reload_context()
+    lefts = load_folder(problem / "left")
+    rights = load_folder(problem / "right")
 
-        collage = problem / "collage.png"
-        if not collage.is_file():
-            log.error("Skipping problem %s: no collage.png", problem.name)
-            continue
+    left_concept = get_iterative_concept(lefts, ask_model, iterative_prompts)
+    reload_context()
+    right_concept = get_iterative_concept(rights, ask_model, iterative_prompts)
 
-        try:
-            lefts = load_folder(problem / "left")
-            rights = load_folder(problem / "right")
-        except InvalidDataset:
-            log.error(
-                "Skipping problem %s: missing left/right subfolders", problem.name
-            )
-            continue
-
-        left_concept = get_iterative_concept(lefts, ask_model, prompts)
-        right_concept = get_iterative_concept(rights, ask_model, prompts)
-
-        answer = ask_model(collage_prompt.format(left_concept, right_concept), collage)
-        answers.append(AnswerItem(problem=problem.name, answer=answer))
-
-    return InferenceResult(prompts=prompts, model=setup.model, answers=answers)
+    return ask_model(collage_prompt.format(left_concept, right_concept), collage)
 
 
+@strategy_func
 def contrastive_direct(
     ask_model: Callable[[str, Path], str],
     reload_context: Callable[[], None],
-    setup: Setup,
-) -> InferenceResult:
-    prompts = setup.prompts
+    prompts: List[str],
+    problem: Path,
+) -> str:
     pair_prompt = prompts[0]
     collage_prompt = prompts[1]
 
-    folder_path = Path(setup.dataset)
-    tasks_folders = load_folder(folder_path)
+    collage = load_file(problem / COLLAGE_NAME)
+    pairs = load_folder(problem / PAIRS_FOLDER)
 
-    answers = []
-    for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
-        reload_context()
+    pairs_decs = get_descriptions(pairs, ask_model, pair_prompt)
 
-        collage = problem / "collage.png"
-        if not collage.is_file():
-            log.error("Skipping problem %s: no collage.png", problem.name)
-            continue
-
-        try:
-            pairs = load_folder(problem / "pairs")
-        except InvalidDataset:
-            log.error("Skipping problem %s: missing pairs subfolder", problem.name)
-            continue
-        pairs_decs = get_descriptions(pairs, ask_model, pair_prompt)
-
-        answer = ask_model(collage_prompt.format(pairs_decs), collage)
-        answers.append(AnswerItem(problem=problem.name, answer=answer))
-
-    return InferenceResult(prompts=prompts, model=setup.model, answers=answers)
+    return ask_model(collage_prompt.format(pairs_decs), collage)
 
 
+@strategy_func
 def contrastive_iterative(
     ask_model: Callable[[str, Path], str],
     reload_context: Callable[[], None],
-    setup: Setup,
-) -> InferenceResult:
-    prompts = setup.prompts
+    prompts: List[str],
+    problem: Path,
+) -> str:
+    pairs = load_folder(problem / PAIRS_FOLDER)
+    return get_iterative_concept(pairs, ask_model, prompts)
 
-    folder_path = Path(setup.dataset)
-    tasks_folders = load_folder(folder_path)
 
-    answers = []
-    for problem in tqdm(tasks_folders, desc="Solving problems", unit="problem"):
-        reload_context()
-
-        try:
-            pairs = load_folder(problem / "pairs")
-        except InvalidDataset:
-            log.error("Skipping problem %s: missing pairs subfolder", problem.name)
-            continue
-
-        answer = get_iterative_concept(pairs, ask_model, prompts)
-        answers.append(AnswerItem(problem=problem.name, answer=answer))
-
-    return InferenceResult(prompts=prompts, model=setup.model, answers=answers)
+STRATEGIES: Dict[StrategyName, StrategyFunc] = {
+    StrategyName.DIRECT: direct,
+    StrategyName.DESCRIPTIVE_DIRECT: descriptive_direct,
+    StrategyName.DESCRIPTIVE_ITERATIVE: descriptive_iterative,
+    StrategyName.CONTRASTIVE_DIRECT: contrastive_direct,
+    StrategyName.CONTRASTIVE_ITERATIVE: contrastive_iterative,
+}
