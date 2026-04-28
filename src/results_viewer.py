@@ -517,6 +517,8 @@ class TestResultsViewer:
             sorted_eval = self._filter_evaluations(mode)
 
             task_keys = list(sorted_eval.keys())
+            task_keys.sort()
+            
             print("\nСписок задач")
             for i, task in enumerate(task_keys):
                 print(f"{i+1}.  {task}")
