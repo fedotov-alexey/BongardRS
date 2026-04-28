@@ -2,8 +2,8 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
-from reader import load_sorted_data
+from typing import Dict, List, Literal
+from reader import load_human_data, load_model_data
 
 
 class ResultSet:
@@ -13,6 +13,7 @@ class ResultSet:
         images_folder: Path,
         evaluation_path: Path = Path("evaluation.json"),
         tasks_to_remove: list[str] = [],
+        mode: Literal["human", "model"] = "human"
     ):
         """
         Инициализация программы
@@ -25,6 +26,7 @@ class ResultSet:
         self.results_path = results_path
         self.images_folder = images_folder
         self.evaluation_path = evaluation_path
+        self.mode = mode
         self.data: dict[str, list[dict[str, str]]] = {}  # General data
         self.users: Dict[str, Dict[str, str]] = {}  # Users info
         self.user_tasks: Dict[str, List[Dict[str, str | int]]] = (
@@ -33,6 +35,13 @@ class ResultSet:
         self.evaluations: Dict[str, Dict[str, Dict[str, str | int]]] = {}
         # Tasks with evaluations by tasks (tasks[user ids[task responses + evaluation]])
 
+        if mode == "model":
+            self.ignore_time: bool = True
+        elif mode == "human":
+            self.ignore_time: bool = False
+        else:
+            raise ValueError(f"Unknown mode: {self.mode}")
+        
         self.load_results()
         self.load_evaluation()
 
@@ -44,13 +53,14 @@ class ResultSet:
         if not self.images_folder.exists():
             print(f"Ошибка: Папка с изображениями {self.images_folder} не найдена!")
             sys.exit(1)
-
-        if self.results_path.suffix == ".ldj":
-            self.data = load_sorted_data(self.results_path)
-        else:
-            with open(self.results_path, "r", encoding="utf-8") as f:
-                self.data = json.load(f)
-
+        if self.mode == "human":
+            if self.results_path.suffix == ".ldj":
+                self.data = load_human_data(self.results_path)
+            else:
+                with open(self.results_path, "r", encoding="utf-8") as f:
+                    self.data = json.load(f)
+        if self.mode == "model":
+            self.data = load_model_data(self.results_path)
         self._exclude_tasks(self.tasks_to_remove)
 
         # data setup
@@ -76,14 +86,15 @@ class ResultSet:
                         "right_answer": record.get("right_answer"),
                         "time": timestamp_difference(
                             records[i - 1].get("timestamp", "N/A"),
-                            record.get("timestamp", "N/A"),
-                        ),
+                            record.get("timestamp", "N/A"), self.ignore_time), 
+                            
                     }
                     self.user_tasks[user_id].append(task_info)
                 elif record.get("response_type") == "email_submission":
                     self.users[user_id]["email"] = record["email"]
 
     def load_evaluation(self):
+        
         if self.evaluation_path.exists():
             with open(self.evaluation_path, "r", encoding="utf-8") as f:
                 self.evaluations = json.load(f)
@@ -95,17 +106,32 @@ class ResultSet:
                     if img_name not in evaluations:
                         evaluations[img_name] = {}
                     if user_id not in evaluations[img_name]:
-                        empty_eval = {
-                            "user_id": user_id,
-                            "username": record["username"],
-                            "left_answer": record["left_answer"],
-                            "right_answer": record["right_answer"],
-                            "time": timestamp_difference(
-                                records[i - 1]["timestamp"],
-                                record.get("timestamp", "N/A"),
-                            ),
-                            "evaluation": "",
-                        }
+                        if self.mode == "human":
+                            empty_eval = {
+                                "user_id": user_id,
+                                "username": record["username"],
+                                "left_answer": record["left_answer"],
+                                "right_answer": record["right_answer"],
+                                "time": timestamp_difference(
+                                    records[i - 1]["timestamp"],
+                                    record.get("timestamp", "N/A"), self.ignore_time
+                                ),
+                                "evaluation": "",
+                            }
+                        else:
+                            empty_eval = {
+                                "user_id": user_id,
+                                "username": record["username"],
+                                "modelname": record["modelname"],
+                                "strategy": record["strategy"],
+                                "left_answer": record["left_answer"],
+                                "right_answer": record["right_answer"],
+                                "time": timestamp_difference(
+                                    records[i - 1]["timestamp"],
+                                    record.get("timestamp", "N/A"), self.ignore_time
+                                ),
+                                "evaluation": "",
+                            }
                         evaluations[img_name][user_id] = empty_eval
 
     def _exclude_tasks(self, tasks: list[str]):
@@ -124,11 +150,12 @@ class ResultSet:
                     if idx not in to_del
                 ]
 
-
-def timestamp_difference(from_timestamp: str, to_timestamp: str) -> int:
+def timestamp_difference(from_timestamp: str, to_timestamp: str, skip: bool = False) -> int:
     """Difference in seconds for to timestamps"""
-
-    time_from = datetime.strptime(from_timestamp, "%Y%m%dT%H%M%S")
-    time_to = datetime.strptime(to_timestamp, "%Y%m%dT%H%M%S")
-    seconds_difference = int((time_to - time_from).total_seconds())
-    return seconds_difference
+    if skip:
+        return 0
+    else:
+        time_from = datetime.strptime(from_timestamp, "%Y%m%dT%H%M%S")
+        time_to = datetime.strptime(to_timestamp, "%Y%m%dT%H%M%S")
+        seconds_difference = int((time_to - time_from).total_seconds())
+        return seconds_difference
