@@ -127,8 +127,6 @@ def clean_data(
             
             except json.JSONDecodeError as e:
                 print(f"Error parsing file: {e}")
-    print(f"type of data{type(parsed_data)}")
-    # breakpoint()
     # Save to JSON file
     if dump:
         with open(output_file, "w", encoding="utf-8") as f:
@@ -190,7 +188,7 @@ def load_model_data(input_file: Path) -> dict[str, list[dict[str, str | int]]]:
 if __name__ == "__main__":
 
     input_file = Path("data/results.json")  # Change this to your input file path
-    # input_file = Path("data/bong_17_04/Bongard(4).ldj")  # Change this to your input file path
+
     output_dir_path = Path("data/bong_17_04")
 
     output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -205,8 +203,3 @@ if __name__ == "__main__":
     sorted_data = sort_data(parsed_data, full=True, dump=True, output_path=group_file, entry_amount=20)
 
 
-# dict_keys(['username', 'timestamp', 'seed', 'response_type', 'age', 'sex', 'occupation'])
-# (Pdb) (parsed_data[1]).keys()
-# dict_keys(['username', 'timestamp', 'seed', 'response_type', 'left_answer', 'right_answer', 'test_image'])dict_keys(['username', 'timestamp', 'seed', 'response_type', 'age', 'sex', 'occupation'])
-# (Pdb) (parsed_data[1]).keys()
-# dict_keys(['username', 'timestamp', 'seed', 'response_type', 'left_answer', 'right_answer', 'test_image'])

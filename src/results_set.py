@@ -106,17 +106,32 @@ class ResultSet:
                     if img_name not in evaluations:
                         evaluations[img_name] = {}
                     if user_id not in evaluations[img_name]:
-                        empty_eval = {
-                            "user_id": user_id,
-                            "username": record["username"],
-                            "left_answer": record["left_answer"],
-                            "right_answer": record["right_answer"],
-                            "time": timestamp_difference(
-                                records[i - 1]["timestamp"],
-                                record.get("timestamp", "N/A"), self.ignore_time
-                            ),
-                            "evaluation": "",
-                        }
+                        if self.mode == "human":
+                            empty_eval = {
+                                "user_id": user_id,
+                                "username": record["username"],
+                                "left_answer": record["left_answer"],
+                                "right_answer": record["right_answer"],
+                                "time": timestamp_difference(
+                                    records[i - 1]["timestamp"],
+                                    record.get("timestamp", "N/A"), self.ignore_time
+                                ),
+                                "evaluation": "",
+                            }
+                        else:
+                            empty_eval = {
+                                "user_id": user_id,
+                                "username": record["username"],
+                                "modelname": record["modelname"],
+                                "strategy": record["strategy"],
+                                "left_answer": record["left_answer"],
+                                "right_answer": record["right_answer"],
+                                "time": timestamp_difference(
+                                    records[i - 1]["timestamp"],
+                                    record.get("timestamp", "N/A"), self.ignore_time
+                                ),
+                                "evaluation": "",
+                            }
                         evaluations[img_name][user_id] = empty_eval
 
     def _exclude_tasks(self, tasks: list[str]):
@@ -134,7 +149,6 @@ class ResultSet:
                     for idx, item in enumerate(full_data[userid])
                     if idx not in to_del
                 ]
-
 
 def timestamp_difference(from_timestamp: str, to_timestamp: str, skip: bool = False) -> int:
     """Difference in seconds for to timestamps"""

@@ -16,7 +16,8 @@ class TestResultsViewer:
         results_path: Path,
         images_folder: Path,
         evaluation_path: Path = Path("evaluation.json"),
-        mode: Literal["human", "model"] = "human"
+        mode: Literal["human", "model"] = "human",
+        tasks_to_eval: list[str] = []
     ) -> None:
         tasks_to_remove = ["bb_m_99.png", "bb_s_38.png", "bb_m_48.png"]
         self.results_path = results_path
@@ -30,6 +31,7 @@ class TestResultsViewer:
         self.user_tasks = results.user_tasks
         self.evaluations = results.evaluations
         self.mode = mode
+        self.tasks_to_eval = tasks_to_eval
     def show_image(self, image_name: str):
         """Show image"""
         image_path = self.images_folder / image_name
@@ -381,7 +383,7 @@ class TestResultsViewer:
             print(
                 f"{i:<3} {stats['username']:<20} {stats['age']:<6} {stats['sex']:<4} {stats['task_count']:<8} {stats['occupation']:<20} {stats['total_time']}"
             )
-
+        breakpoint()
         input("\nНажмите Enter для продолжения...")
 
     def show_task_stats(
@@ -396,6 +398,7 @@ class TestResultsViewer:
         for image_name, responses in self.evaluations.items():
             sum_time = 0
             for response in responses.values():
+
                 sum_time += response["time"]
             mean_time = sum_time / len(responses)
 
@@ -409,10 +412,10 @@ class TestResultsViewer:
                 }
             )
         task_stats.sort(
-            key=lambda x: x["response_count"], reverse=True
+            key=lambda x: x["correct"], reverse=True
         )  # Sorting tasks stats
-        numbers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        counts = [0] * 20
+        numbers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+        counts = [0] * 26
 
         if create_json:
             task_list = []
@@ -469,7 +472,7 @@ class TestResultsViewer:
 
         input("\nНажмите Enter для продолжения...")
 
-    def evaluate_task(self, task_id: str, mode: Literal["all", "unrated", "unclear"]):
+    def evaluate_task(self, task_id: str, mode: Literal["all", "unrated", "unclear", "list"]):
 
         print("\n" + "=" * 60)
         print(f"ПРОВЕРКА ЗАДАЧ")
@@ -483,7 +486,7 @@ class TestResultsViewer:
             if (
                 (mode == "unclear" and answer["evaluation"] not in ["", "y", "n"])
                 or (mode == "unrated" and answer["evaluation"] == "")
-                or mode == "all"
+                or mode == "all" or mode == "list"
             ):
                 print(f"\nОтветы {user_id}:")
                 print({answer["left_answer"]})
@@ -509,7 +512,7 @@ class TestResultsViewer:
         if not images:
             print("Нет данных об ответах на изображения!")
             return
-        mode: Literal["all", "unrated", "unclear"] = "all"
+        mode: Literal["all", "unrated", "unclear", "list"] = "all"
         while True:
             sorted_eval = self._filter_evaluations(mode)
 
@@ -521,7 +524,7 @@ class TestResultsViewer:
             while True:
                 try:
                     print(
-                        f"\nВыбранный режим: {mode}. 'all' - Все задачи; 'unrated' - Не оцененные задачи; 'unclear' - Неоднозначные ответы; 'q' - выход"
+                        f"\nВыбранный режим: {mode}. 'all' - Все задачи; 'unrated' - Не оцененные задачи; 'unclear' - Неоднозначные ответы; 'list' - Выборка задач 'q' - выход"
                     )
                     choice = input(
                         f"Выберите задачу (1-{len(task_keys)}) или режим: "
@@ -536,6 +539,9 @@ class TestResultsViewer:
                         break
                     elif choice.lower() == "unrated":
                         mode = "unrated"
+                        break
+                    elif choice.lower() == "list":
+                        mode = "list"
                         break
                     idx = int(choice) - 1
                     if 0 <= idx < len(task_keys):
@@ -559,7 +565,7 @@ class TestResultsViewer:
             print("4. Проверка задач")
             print("5. Выход")
 
-            choice = input("\nВыберите пункт меню (1-4): ").strip()
+            choice = input("\nВыберите пункт меню (1-5): ").strip()
 
             if choice == "1":
                 self.show_image_with_responses()
@@ -575,15 +581,37 @@ class TestResultsViewer:
             else:
                 print("Пожалуйста, выберите пункт от 1 до 5")
 
-    def _filter_evaluations(self, mode: Literal["all", "unrated", "unclear"]):
+    def _count_correct(self, user_id:str) -> int:
+        correct_amount = 0
+        for task in self.evaluations.values():
+            for user in task:
+                if user == user_id:
+                    if task[user]["evaluation"] == "y":
+                        correct_amount += 1
+        return correct_amount
+    
+    def save_user_answers(self, user_id:str):
+        user_answers = []
+        for task in self.evaluations.values():
+            for user in task:
+                if user == user_id:
+                    user_answers.append(task[user_id])
+        return user_answers
+
+    def _filter_evaluations(self, mode: Literal["all", "unrated", "unclear", "list"]) -> Dict[str, Dict[str, Dict[str, str | int]]]:
         """Returns evaluations only across"""
         if mode == "all":
             return deepcopy(self.evaluations)
-
         if mode == "unrated":
             check = lambda e: e == ""
         elif mode == "unclear":
             check = lambda e: e not in {"", "y", "n"}
+        elif mode == "list":
+            filtered = {}
+            for key in self.tasks_to_eval:
+                if key in self.evaluations:
+                    filtered[key] = deepcopy(self.evaluations[key])
+            return filtered
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
@@ -592,6 +620,7 @@ class TestResultsViewer:
             for p, evals in self.evaluations.items()
             if any(check(u["evaluation"]) for u in evals.values())
         }
+    
 
 
 def calc_correct_task(
@@ -615,25 +644,12 @@ def calc_correct_task(
     return correct
 
 
-def main():
-    """Основная функция"""
+if __name__ == "__main__":
     print("=" * 60)
     print("ЗАГРУЗКА ПРОГРАММЫ")
     print("=" * 60)
-
-    # Получение путей от пользователя
-    # json_path = Path("data/results_qwen.json")
-    # json_path = Path("data/results.json")
-    json_path = Path("data/bong_21_4/Bongard(4).ldj")
-    images_folder = Path("/mnt/storage/bong_bench/FTP")
-    # evaluation_path = Path("data/eval_models1.json") # Could not exist
-    evaluation_path = Path("data/eval1.json") # Could not exist
-
-    # Создаем и запускаем приложение
-    app = TestResultsViewer(json_path, images_folder, evaluation_path, mode = "human")
-    app = TestResultsViewer(json_path, images_folder, evaluation_path, mode = "human")
+    test_results = Path(...)
+    images_folder = Path(...)
+    evaluation_path = Path(...) # Will be created if doesn't exist
+    app = TestResultsViewer(test_results, images_folder, evaluation_path, mode = "human")
     app.main_menu()
-
-
-if __name__ == "__main__":
-    main()
